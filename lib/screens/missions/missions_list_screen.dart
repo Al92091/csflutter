@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../../config/theme.dart';
 import '../../models/mission.dart';
 import '../../services/mission_service.dart';
@@ -13,9 +14,25 @@ class MissionsListScreen extends StatefulWidget {
   State<MissionsListScreen> createState() => _MissionsListScreenState();
 }
 
+/// Représente soit un groupe, soit une mission seule
+class _MissionGroup {
+  final Mission representative;    // mission affichée dans la carte
+  final int count;                 // Xn
+  final List<Mission> missions;    // toutes les missions du groupe
+
+  _MissionGroup({
+    required this.representative,
+    required this.count,
+    required this.missions,
+  });
+}
+
 class _MissionsListScreenState extends State<MissionsListScreen> {
   final MissionService _missionService = MissionService();
+
   List<Mission> _missions = [];
+  List<_MissionGroup> _groups = [];
+
   bool _isLoading = true;
   String? _errorMessage;
 
@@ -33,8 +50,11 @@ class _MissionsListScreenState extends State<MissionsListScreen> {
 
     try {
       final missions = await _missionService.fetchAvailableMissions();
+      final groups = _groupMissions(missions);
+
       setState(() {
         _missions = missions;
+        _groups = groups;
         _isLoading = false;
       });
     } catch (e) {
@@ -43,6 +63,79 @@ class _MissionsListScreenState extends State<MissionsListScreen> {
         _isLoading = false;
       });
     }
+  }
+
+  /// Calqué sur la logique Lovable (site) :
+  ///
+  /// - Si `is_group_order` = true
+  /// - et `group_order_id` non nul
+  /// - et `group_order_type == 'same_vehicles_same_dest'`
+  ///   -> on regroupe les missions ayant le même group_order_id
+  ///
+  /// Sinon, mission individuelle.
+  List<_MissionGroup> _groupMissions(List<Mission> missions) {
+    final Map<String, List<Mission>> buckets = {};
+    final List<Mission> individuals = [];
+
+    for (final mission in missions) {
+      final isSameVehicleSameDest =
+          mission.isGroupOrder &&
+          mission.groupOrderId != null &&
+          mission.groupOrderType == 'same_vehicles_same_dest';
+
+      if (isSameVehicleSameDest) {
+        final key = mission.groupOrderId!;
+        buckets.putIfAbsent(key, () => []).add(mission);
+      } else {
+        individuals.add(mission);
+      }
+    }
+
+    final List<_MissionGroup> result = [];
+
+    // Groupes SameVehicleSameDest
+    buckets.forEach((groupId, list) {
+      if (list.isEmpty) return;
+
+      // on peut trier par deadline ou pickup
+      list.sort((a, b) {
+        final ad = a.deliveryDeadline ?? a.pickupDatetime ?? a.createdAt;
+        final bd = b.deliveryDeadline ?? b.pickupDatetime ?? b.createdAt;
+        return ad.compareTo(bd);
+      });
+
+      result.add(
+        _MissionGroup(
+          representative: list.first,
+          count: list.length,
+          missions: list,
+        ),
+      );
+    });
+
+    // Missions individuelles
+    for (final m in individuals) {
+      result.add(
+        _MissionGroup(
+          representative: m,
+          count: 1,
+          missions: [m],
+        ),
+      );
+    }
+
+    // Tri global : comme la requête, par delivery_deadline puis pickup
+    result.sort((a, b) {
+      final ad = a.representative.deliveryDeadline ??
+          a.representative.pickupDatetime ??
+          a.representative.createdAt;
+      final bd = b.representative.deliveryDeadline ??
+          b.representative.pickupDatetime ??
+          b.representative.createdAt;
+      return ad.compareTo(bd);
+    });
+
+    return result;
   }
 
   @override
@@ -100,7 +193,7 @@ class _MissionsListScreenState extends State<MissionsListScreen> {
       );
     }
 
-    if (_missions.isEmpty) {
+    if (_groups.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -129,20 +222,26 @@ class _MissionsListScreenState extends State<MissionsListScreen> {
       onRefresh: _loadMissions,
       child: ListView.builder(
         padding: const EdgeInsets.all(16),
-        itemCount: _missions.length,
+        itemCount: _groups.length,
         itemBuilder: (context, index) {
-          final mission = _missions[index];
+          final group = _groups[index];
+          final mission = group.representative;
+
           return MissionCard(
             mission: mission,
+            // 🔥 c’est ici qu’on passe le nombre pour le badge Xn
+            remainingCount: group.count,
             onTap: () {
-              Navigator.of(context).push(
+              Navigator.of(context)
+                  .push(
                 MaterialPageRoute(
                   builder: (_) => MissionDetailScreen(
                     missionId: mission.id,
-                    isAvailable: true, // ✅ flag pour dire qu'on est dans "missions disponibles"
+                    isAvailable: true,
                   ),
                 ),
-              ).then((_) => _loadMissions());
+              )
+                  .then((_) => _loadMissions());
             },
           );
         },
