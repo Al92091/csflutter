@@ -1,0 +1,314 @@
+import 'package:flutter/material.dart';
+
+import '../../../config/constants.dart';
+import '../../../config/theme.dart';
+import '../../../models/mission.dart';
+import '../../../models/inspection_report.dart';
+import '../../../services/inspection_service.dart';
+
+/// Petit modèle interne pour une ligne de check-list
+class _ChecklistItem {
+  final String id;
+  final String label;
+
+  const _ChecklistItem({
+    required this.id,
+    required this.label,
+  });
+}
+
+class ArrivalChecklistStep extends StatefulWidget {
+  final Mission mission;
+
+  const ArrivalChecklistStep({
+    super.key,
+    required this.mission,
+  });
+
+  /// Règle métier :
+  /// Si toutes les options décrites sont à FALSE
+  /// ET fuel_management = "pas_de_remise"
+  /// → la page de check-list ne doit PAS s'afficher.
+  static bool shouldShowForMission(Mission mission) {
+    final noOptionsSelected =
+        (mission.basicHandover != true) &&
+        (mission.comfortHandover != true) &&
+        (mission.basicWashing != true) &&
+        (mission.standardWashing != true) &&
+        (mission.premiumWashing != true) &&
+        (mission.wGarage != true);
+
+    final isPasDeRemise = mission.fuelManagement == 'pas_de_remise';
+
+    if (noOptionsSelected && isPasDeRemise) {
+      return false;
+    }
+
+    return true;
+  }
+
+  @override
+  State<ArrivalChecklistStep> createState() => _ArrivalChecklistStepState();
+}
+
+class _ArrivalChecklistStepState extends State<ArrivalChecklistStep> {
+  final InspectionService _inspectionService = InspectionService();
+
+  bool _isLoading = true;
+  String? _warningMessage;
+
+  List<_ChecklistItem> _items = [];
+  Map<String, bool> _checked = {};
+
+  /// Niveau de carburant au départ (EDL de départ)
+  int? _departureFuelLevel;
+
+  @override
+  void initState() {
+    super.initState();
+    _initChecklist();
+  }
+
+  Future<void> _initChecklist() async {
+    try {
+      // Si fuel_management = "remise_niveau" → on récupère l'EDL de départ
+      if (widget.mission.fuelManagement == 'remise_niveau') {
+        try {
+          final InspectionReport? departureReport =
+              await _inspectionService.getInspectionReportForMission(
+            widget.mission.id,
+            AppConstants.inspectionDeparture,
+          );
+
+          _departureFuelLevel = departureReport?.fuelLevel;
+        } catch (e) {
+          _warningMessage =
+              "Impossible de récupérer le niveau de carburant de départ.";
+        }
+      }
+
+      final items = <_ChecklistItem>[];
+
+      // --- Options de mise en main ---
+      if (widget.mission.basicHandover == true) {
+        items.add(const _ChecklistItem(
+          id: 'basic_handover',
+          label:
+              'Je n\'oublie pas d\'effectuer la mise en main classique (10 à 15 minutes)',
+        ));
+      }
+
+      if (widget.mission.comfortHandover == true) {
+        items.add(const _ChecklistItem(
+          id: 'comfort_handover',
+          label:
+              'Je n\'oublie pas d\'effectuer la mise en main premium (30 minutes)',
+        ));
+      }
+
+      // --- Options de lavage ---
+      if (widget.mission.basicWashing == true) {
+        items.add(const _ChecklistItem(
+          id: 'basic_washing',
+          label:
+              'Je n\'oublie pas d\'effectuer un lavage basique (Lavage extérieur AU JET PAS DE ROULEAU)',
+        ));
+      }
+
+      if (widget.mission.standardWashing == true) {
+        items.add(const _ChecklistItem(
+          id: 'standard_washing',
+          label:
+              'Je n\'oublie pas d\'effectuer un lavage standard (Lavage extérieur AU JET PAS DE ROULEAU, Intérieur aspirateur)',
+        ));
+      }
+
+      if (widget.mission.premiumWashing == true) {
+        items.add(const _ChecklistItem(
+          id: 'premium_washing',
+          label:
+              'Je n\'oublie pas d\'effectuer un lavage premium (Lavage extérieur AU JET PAS DE ROULEAU, Intérieur aspirateur et chiffon)',
+        ));
+      }
+
+      // --- Gestion carburant ---
+      if (widget.mission.fuelManagement == 'remise_niveau') {
+        final displayValue = _departureFuelLevel != null
+            ? '${_departureFuelLevel!.toString()} %'
+            : '"valeur" %';
+
+        items.add(_ChecklistItem(
+          id: 'fuel_remise_niveau',
+          label:
+              'J\'ai remis le carburant au même niveau qu\'au départ ($displayValue)',
+        ));
+      }
+
+      if (widget.mission.fuelManagement == 'plein') {
+        items.add(const _ChecklistItem(
+          id: 'fuel_plein',
+          label: 'J\'ai fait le plein de carburant',
+        ));
+      }
+
+      // --- Plaque W-Garage ---
+      if (widget.mission.wGarage == true) {
+        items.add(const _ChecklistItem(
+          id: 'w_garage',
+          label: 'Je n\'oublie pas de retirer ma plaque W-Garage',
+        ));
+      }
+
+      // Initialisation des cases cochées
+      final checked = <String, bool>{};
+      for (final item in items) {
+        checked[item.id] = false;
+      }
+
+      setState(() {
+        _items = items;
+        _checked = checked;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+        _warningMessage = 'Erreur lors du chargement de la check-list.';
+      });
+    }
+  }
+
+  /// Renvoie true si toutes les cases sont cochées.
+  bool get _allChecked {
+    if (_items.isEmpty) return true; // si aucun item, on considère que c'est OK
+    if (_checked.isEmpty) return false;
+    return _checked.values.every((v) => v == true);
+  }
+
+  /// Méthode appelée depuis InspectionFlowScreen avant de passer au step suivant.
+  ///
+  /// Retourne true si on peut continuer, false sinon (et affiche un message).
+  bool validateChecklist() {
+    if (!_allChecked) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content:
+              Text('Merci de cocher toutes les cases avant de continuer.'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+      return false;
+    }
+    return true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Center(
+        child: CircularProgressIndicator(),
+      );
+    }
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Center(
+            child: Icon(
+              Icons.checklist_rounded,
+              size: 80,
+              color: AppTheme.primaryColor,
+            ),
+          ),
+          const SizedBox(height: 24),
+          const Center(
+            child: Text(
+              'Check-list d\'arrivée',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Merci de confirmer les actions suivantes avant de finaliser l\'état des lieux d\'arrivée.',
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 24),
+
+          if (_warningMessage != null) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.shade200),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline, color: Colors.orange),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _warningMessage!,
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          if (_items.isEmpty)
+            const Center(
+              child: Text(
+                'Aucune action spécifique n\'est requise pour cette mission.',
+                style: TextStyle(color: AppTheme.textSecondary),
+              ),
+            )
+          else
+            Column(
+              children: _items.map((item) {
+                final value = _checked[item.id] ?? false;
+                return Card(
+                  elevation: 0,
+                  margin: const EdgeInsets.symmetric(vertical: 4),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(
+                      color: value
+                          ? AppTheme.successColor
+                          : AppTheme.textHint.withOpacity(0.5),
+                    ),
+                  ),
+                  child: CheckboxListTile(
+                    value: value,
+                    onChanged: (v) {
+                      setState(() {
+                        _checked[item.id] = v ?? false;
+                      });
+                    },
+                    title: Text(
+                      item.label,
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                    controlAffinity: ListTileControlAffinity.leading,
+                    activeColor: AppTheme.primaryColor,
+                  ),
+                );
+              }).toList(),
+            ),
+        ],
+      ),
+    );
+  }
+}
