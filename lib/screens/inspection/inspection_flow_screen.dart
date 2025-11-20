@@ -1,22 +1,23 @@
-import 'dart:io';
 import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
-import '../../config/theme.dart';
 import '../../config/constants.dart';
-import '../../models/mission.dart';
+import '../../config/theme.dart';
 import '../../models/inspection_report.dart';
+import '../../models/mission.dart';
 import '../../services/inspection_service.dart';
+import '../../services/local_inspection_storage_service.dart';
 import '../../services/location_service.dart';
 import '../../services/mission_service.dart';
-import '../../services/local_inspection_storage_service.dart';
-
-import 'steps/driver_photo_step.dart';
+import 'steps/arrival_checklist_step.dart';
 import 'steps/contact_info_step.dart';
+import 'steps/driver_photo_step.dart';
+import 'steps/expenses_step.dart';
+import 'steps/signature_step.dart';
 import 'steps/vehicle_info_step.dart';
 import 'steps/vehicle_photos_step.dart';
-import 'steps/signature_step.dart';
-import 'steps/expenses_step.dart';
 
 class InspectionFlowScreen extends StatefulWidget {
   final Mission mission;
@@ -40,19 +41,24 @@ class _InspectionFlowScreenState extends State<InspectionFlowScreen> {
   // key pour valider VehicleInfoStep
   final GlobalKey _vehicleStepKey = GlobalKey();
 
+  // key pour valider ArrivalChecklistStep
+  final GlobalKey _arrivalChecklistKey = GlobalKey();
+
   int _currentStep = 0;
   bool _isSubmitting = false;
 
   // Données collectées
   String? _driverPhotoPath;
+
   String? _contactFirstName;
   String? _contactLastName;
   String? _contactPhone;
+
   int? _mileage;
   int? _fuelLevel;
   String? _dashboardPhotoPath;
 
-  // Nouvelle liste fusionnée pour toutes les photos véhicule
+  // Liste fusionnée pour toutes les photos véhicule
   List<Map<String, dynamic>> _vehiclePhotos = [];
 
   // Signatures + photo contrat / état des lieux
@@ -71,6 +77,19 @@ class _InspectionFlowScreenState extends State<InspectionFlowScreen> {
   String? _tollExpensePhotoPath;
   bool _skipExpenses = false;
 
+  // --------- NOUVEAU : gestion de la check-list d'arrivée ---------
+
+  /// Indique si, pour cette session, on doit afficher le step
+  /// "Check-list d'arrivée" avant DriverPhotoStep.
+  bool _showArrivalChecklistStep = false;
+
+  /// Vrai si l'utilisateur a déjà coché toutes les cases et est passé
+  /// au step suivant au moins une fois (dans cette inspection).
+  ///
+  /// → Sert à ne plus réafficher la page si on reprend un brouillon
+  /// après l'avoir déjà validée.
+  bool _arrivalChecklistValidatedOnce = false;
+
   bool get _isDepartureInspection =>
       widget.inspectionType == AppConstants.inspectionDeparture;
 
@@ -88,15 +107,40 @@ class _InspectionFlowScreenState extends State<InspectionFlowScreen> {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // CHECK-LIST D'ARRIVÉE : LOGIQUE D'AFFICHAGE
+  // ---------------------------------------------------------------------------
+
+  bool _hasArrivalChecklistOptions() {
+    return ArrivalChecklistStep.shouldShowForMission(widget.mission);
+  }
+
+  // ---------------------------------------------------------------------------
+  // STEPS DU FLOW
+  // ---------------------------------------------------------------------------
+
   List<Widget> get _steps {
-    final steps = <Widget>[
+    final steps = <Widget>[];
+
+    // EDL d'arrivée : on place la check-list AVANT la photo conducteur
+    if (!_isDepartureInspection && _showArrivalChecklistStep) {
+      steps.add(
+        ArrivalChecklistStep(
+          key: _arrivalChecklistKey,
+          mission: widget.mission,
+        ),
+      );
+    }
+
+    // Step commun : photo du conducteur
+    steps.add(
       DriverPhotoStep(
         onPhotoTaken: (path) {
           setState(() => _driverPhotoPath = path);
         },
         initialPhotoPath: _driverPhotoPath,
       ),
-    ];
+    );
 
     if (_isDepartureInspection) {
       // EDL de départ :
@@ -140,6 +184,7 @@ class _InspectionFlowScreenState extends State<InspectionFlowScreen> {
       ]);
     } else {
       // EDL d'arrivée :
+      // (éventuellement) Check-list
       // 1. Infos véhicule
       // 2. Frais
       // 3. Photos véhicule
@@ -197,10 +242,14 @@ class _InspectionFlowScreenState extends State<InspectionFlowScreen> {
       ]);
     }
 
+    // Step final : signatures & photo globale
     steps.add(
       SignatureStep(
-        onSignaturesChanged:
-            (String? etatDesLieuxPhotoPath, String? driverSig, String? contactSig) {
+        onSignaturesChanged: (
+          String? etatDesLieuxPhotoPath,
+          String? driverSig,
+          String? contactSig,
+        ) {
           setState(() {
             _etatDesLieuxPhotoPath = etatDesLieuxPhotoPath;
             _driverSignaturePath = driverSig;
@@ -225,6 +274,13 @@ class _InspectionFlowScreenState extends State<InspectionFlowScreen> {
   @override
   void initState() {
     super.initState();
+
+    if (!_isDepartureInspection) {
+      // Pour un EDL d'arrivée, on détermine dès le début si la check-list
+      // doit exister pour cette mission.
+      _showArrivalChecklistStep = _hasArrivalChecklistOptions();
+    }
+
     _checkLocation();
     _initDraftIfAny();
   }
@@ -267,16 +323,19 @@ class _InspectionFlowScreenState extends State<InspectionFlowScreen> {
       'toll_expense': _tollExpense,
       'toll_expense_photo_path': _tollExpensePhotoPath,
       'skip_expenses': _skipExpenses,
+
+      // Nouveau : on mémorise si la check-list a déjà été validée au moins une fois
+      'arrival_checklist_validated': _arrivalChecklistValidatedOnce,
     };
   }
 
   Future<void> _restoreDraft(Map<String, dynamic> draft) async {
     setState(() {
-      _currentStep = (draft['current_step'] ?? 0) is int
-          ? draft['current_step'] as int
-          : 0;
+      _currentStep =
+          (draft['current_step'] ?? 0) is int ? draft['current_step'] as int : 0;
 
       _driverPhotoPath = draft['driver_photo_path'] as String?;
+
       _contactFirstName = draft['contact_first_name'] as String?;
       _contactLastName = draft['contact_last_name'] as String?;
       _contactPhone = draft['contact_phone'] as String?;
@@ -302,10 +361,8 @@ class _InspectionFlowScreenState extends State<InspectionFlowScreen> {
 
       _etatDesLieuxPhotoPath =
           draft['etat_des_lieux_photo_path'] as String?;
-      _driverSignaturePath =
-          draft['driver_signature_path'] as String?;
-      _contactSignaturePath =
-          draft['contact_signature_path'] as String?;
+      _driverSignaturePath = draft['driver_signature_path'] as String?;
+      _contactSignaturePath = draft['contact_signature_path'] as String?;
 
       final latVal = draft['latitude'];
       if (latVal is num) _latitude = latVal.toDouble();
@@ -315,18 +372,40 @@ class _InspectionFlowScreenState extends State<InspectionFlowScreen> {
 
       final fuelExpVal = draft['fuel_expense'];
       if (fuelExpVal is num) _fuelExpense = fuelExpVal.toDouble();
-
       _fuelExpensePhotoPath =
           draft['fuel_expense_photo_path'] as String?;
 
       final tollExpVal = draft['toll_expense'];
       if (tollExpVal is num) _tollExpense = tollExpVal.toDouble();
-
       _tollExpensePhotoPath =
           draft['toll_expense_photo_path'] as String?;
 
       _skipExpenses = draft['skip_expenses'] == true;
+
+      _arrivalChecklistValidatedOnce =
+          draft['arrival_checklist_validated'] == true;
     });
+
+    // Logique spécifique à la check-list en cas de reprise :
+    if (!_isDepartureInspection) {
+      final hasOptions = _hasArrivalChecklistOptions();
+
+      if (_arrivalChecklistValidatedOnce && hasOptions) {
+        // La check-list avait déjà été validée : on ne la réaffiche plus.
+        // On décale l'index du step pour compenser le step manquant.
+        setState(() {
+          _showArrivalChecklistStep = false;
+          if (_currentStep > 0) {
+            _currentStep = _currentStep - 1;
+          }
+        });
+      } else {
+        // Checklist jamais validée → elle reste visible si les options existent
+        setState(() {
+          _showArrivalChecklistStep = hasOptions;
+        });
+      }
+    }
 
     // Repositionner le PageView au bon step
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -337,9 +416,8 @@ class _InspectionFlowScreenState extends State<InspectionFlowScreen> {
   }
 
   Future<void> _initDraftIfAny() async {
-    final exists = await LocalInspectionStorageService.draftExists(
-      widget.mission.id,
-    );
+    final exists =
+        await LocalInspectionStorageService.draftExists(widget.mission.id);
     if (!exists) return;
     if (!mounted) return;
 
@@ -349,7 +427,8 @@ class _InspectionFlowScreenState extends State<InspectionFlowScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Un état des lieux a déjà été commencé'),
         content: const Text(
-            'Souhaitez-vous reprendre l\'état des lieux en cours ou recommencer un nouvel état des lieux ?'),
+          'Souhaitez-vous reprendre l\'état des lieux en cours ou recommencer un nouvel état des lieux ?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop('restart'),
@@ -366,11 +445,13 @@ class _InspectionFlowScreenState extends State<InspectionFlowScreen> {
     if (!mounted) return;
 
     if (choice == 'resume') {
-      final draft = await LocalInspectionStorageService.loadDraftInspection(
+      final draft =
+          await LocalInspectionStorageService.loadDraftInspection(
         widget.mission.id,
       );
       if (draft != null) {
-        await _restoreDraft(draft);
+        await _restoreDraft(
+            Map<String, dynamic>.from(draft as Map<dynamic, dynamic>));
       }
     } else if (choice == 'restart') {
       await LocalInspectionStorageService.deleteDraftInspection(
@@ -415,8 +496,21 @@ class _InspectionFlowScreenState extends State<InspectionFlowScreen> {
   }
 
   void _nextStep() {
-    // Validation du step "infos véhicule" quel que soit son index
-    final currentWidget = _steps[_currentStep];
+    final steps = _steps;
+    final currentWidget = steps[_currentStep];
+
+    // 1) Validation du step "check-list d'arrivée"
+    if (currentWidget is ArrivalChecklistStep) {
+      final state = _arrivalChecklistKey.currentState;
+      final isValid = (state as dynamic?)?.validateChecklist() == true;
+      if (!isValid) {
+        return;
+      }
+      // La check-list a été validée au moins une fois
+      _arrivalChecklistValidatedOnce = true;
+    }
+
+    // 2) Validation du step "infos véhicule" quel que soit son index
     if (currentWidget is VehicleInfoStep) {
       final state = _vehicleStepKey.currentState;
       final isValid = (state as dynamic?)?.validateAndSave() == true;
@@ -431,7 +525,7 @@ class _InspectionFlowScreenState extends State<InspectionFlowScreen> {
       }
     }
 
-    if (_currentStep < _steps.length - 1) {
+    if (_currentStep < steps.length - 1) {
       setState(() => _currentStep++);
       _pageController.nextPage(
         duration: const Duration(milliseconds: 300),
@@ -499,8 +593,7 @@ class _InspectionFlowScreenState extends State<InspectionFlowScreen> {
     try {
       // Convertir fichiers → base64
       final driverPhotoBase64 = await _fileToBase64(_driverPhotoPath);
-      final dashboardPhotoBase64 =
-          await _fileToBase64(_dashboardPhotoPath);
+      final dashboardPhotoBase64 = await _fileToBase64(_dashboardPhotoPath);
       final driverSignatureBase64 =
           await _fileToBase64(_driverSignaturePath);
       final contactSignatureBase64 =
@@ -516,7 +609,7 @@ class _InspectionFlowScreenState extends State<InspectionFlowScreen> {
       final photosBase64 = <Map<String, dynamic>>[];
 
       for (final photo in _vehiclePhotos) {
-        final base64 = await _fileToBase64(photo['path']);
+        final base64 = await _fileToBase64(photo['path'] as String?);
         if (base64 == null) continue;
 
         String category = (photo['category'] as String?) ?? '';
@@ -527,8 +620,8 @@ class _InspectionFlowScreenState extends State<InspectionFlowScreen> {
           category = 'accessories';
         }
         // Photos optionnelles :
-        // - optional_type == 'degats'           → damages
-        // - optional_type != 'degats' ou null   → accessories
+        // - optional_type == 'degats' → damages
+        // - optional_type != 'degats' ou null → accessories
         else if (category == 'optional') {
           if (optionalType == 'degats') {
             category = 'damages';
@@ -594,6 +687,7 @@ class _InspectionFlowScreenState extends State<InspectionFlowScreen> {
       }
 
       if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('État des lieux envoyé avec succès !'),
@@ -605,6 +699,7 @@ class _InspectionFlowScreenState extends State<InspectionFlowScreen> {
     } catch (e) {
       print('Erreur lors de l\'envoi de l\'inspection: $e');
       if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Erreur lors de l\'envoi de l\'inspection.'),
@@ -620,6 +715,8 @@ class _InspectionFlowScreenState extends State<InspectionFlowScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final steps = _steps;
+
     return WillPopScope(
       // Bouton retour Android
       onWillPop: () async {
@@ -648,7 +745,7 @@ class _InspectionFlowScreenState extends State<InspectionFlowScreen> {
           child: Column(
             children: [
               LinearProgressIndicator(
-                value: (_currentStep + 1) / _steps.length,
+                value: (_currentStep + 1) / steps.length,
                 backgroundColor: Colors.grey[200],
                 color: AppTheme.primaryColor,
               ),
@@ -656,8 +753,8 @@ class _InspectionFlowScreenState extends State<InspectionFlowScreen> {
                 child: PageView.builder(
                   controller: _pageController,
                   physics: const NeverScrollableScrollPhysics(),
-                  itemCount: _steps.length,
-                  itemBuilder: (context, index) => _steps[index],
+                  itemCount: steps.length,
+                  itemBuilder: (context, index) => steps[index],
                 ),
               ),
               Padding(
@@ -676,7 +773,7 @@ class _InspectionFlowScreenState extends State<InspectionFlowScreen> {
                       child: ElevatedButton(
                         onPressed: _isSubmitting ? null : _nextStep,
                         child: Text(
-                          _currentStep == _steps.length - 1
+                          _currentStep == steps.length - 1
                               ? 'Terminer'
                               : 'Suivant',
                         ),
@@ -692,3 +789,4 @@ class _InspectionFlowScreenState extends State<InspectionFlowScreen> {
     );
   }
 }
+
