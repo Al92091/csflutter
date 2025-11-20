@@ -6,6 +6,11 @@ class Mission {
   final String status;
   final String? missionStatusDriver;
 
+  // 🔥 Nouveau : info de group order
+  final bool isGroupOrder;         // missions.is_group_order
+  final String? groupOrderId;      // missions.group_order_id
+  final String? groupOrderType;    // group_orders.group_order_type (flatten)
+
   final String departureAddress;
   final String? departureCity;
   final String? departurePostalCode;
@@ -33,6 +38,7 @@ class Mission {
   final double? reservedDriverPrice;
 
   final String? vehicleImageUrl;
+
   final bool? basicHandover;
   final bool? comfortHandover;
   final bool? documentManagement;
@@ -40,13 +46,13 @@ class Mission {
   final bool? basicWashing;
   final bool? standardWashing;
   final bool? premiumWashing;
-
   final String? fuelManagement;
+
   final String? companyLogoUrl;
   final String? customerType;
   final String? estimatedTravelTime;
 
-  /// Pour le calcul de prix
+  /// Pour le calcul de prix final
   final bool? electricVehicle;
   final bool? isReturnMission;
   final String? missionType;
@@ -54,25 +60,25 @@ class Mission {
   final String? departureInspectionId;
   final String? arrivalInspectionId;
 
-  // ✅ Nouveaux champs pour Contacts
+  // ✅ Contacts
   final String? departureContactName;
   final String? departureContactPhone;
   final String? arrivalContactName;
   final String? arrivalContactPhone;
 
-  // ✅ Nouveaux champs pour Véhicule
+  // ✅ Véhicule
   final String? vehicleRegistration;
   final String? vehicleChassisNumber;
   final String? vehicleTransmission;
   final int? vehicleSeats;
 
-  // ✅ Nouveaux champs pour Itinéraire
+  // ✅ Itinéraire
   final String? departureLocationType;
   final String? departurePlaceName;
   final String? arrivalLocationType;
   final String? arrivalPlaceName;
 
-  // ✅ Nouveau champ : Notes pour le convoyeur
+  // ✅ Notes convoyeur
   final String? vehicleNotes;
 
   final DateTime createdAt;
@@ -85,6 +91,12 @@ class Mission {
     this.driverId,
     required this.status,
     this.missionStatusDriver,
+
+    // 🔥 Group orders
+    required this.isGroupOrder,
+    this.groupOrderId,
+    this.groupOrderType,
+
     required this.departureAddress,
     this.departureCity,
     this.departurePostalCode,
@@ -134,12 +146,12 @@ class Mission {
     this.departurePlaceName,
     this.arrivalLocationType,
     this.arrivalPlaceName,
-    this.vehicleNotes, // ✅ ajouté ici
+    this.vehicleNotes,
     required this.createdAt,
     required this.updatedAt,
   });
 
-  factory Mission.fromJson(Map<String, dynamic> json) {
+  factory Mission.fromJson(Map json) {
     final logo = json['company_logo_url']?.toString();
 
     return Mission(
@@ -149,6 +161,12 @@ class Mission {
       driverId: json['driver_id']?.toString(),
       status: json['status'].toString(),
       missionStatusDriver: json['missionstatusdriver']?.toString(),
+
+      // 🔥 Nouveau : champs de group order
+      isGroupOrder: json['is_group_order'] == true,
+      groupOrderId: json['group_order_id']?.toString(),
+      groupOrderType: json['group_order_type']?.toString(),
+
       departureAddress: json['departure_address'].toString(),
       departureCity: json['departure_city']?.toString(),
       departurePostalCode: json['departure_postal_code']?.toString(),
@@ -222,7 +240,7 @@ class Mission {
       departurePlaceName: json['departure_place_name']?.toString(),
       arrivalLocationType: json['arrival_location_type']?.toString(),
       arrivalPlaceName: json['arrival_place_name']?.toString(),
-      vehicleNotes: json['vehicle_notes']?.toString(), // ✅ ajouté ici
+      vehicleNotes: json['vehicle_notes']?.toString(),
       createdAt: DateTime.parse(json['created_at'].toString()),
       updatedAt: DateTime.parse(json['updated_at'].toString()),
     );
@@ -236,6 +254,12 @@ class Mission {
       'driver_id': driverId,
       'status': status,
       'missionstatusdriver': missionStatusDriver,
+
+      // 🔥 Group orders
+      'is_group_order': isGroupOrder,
+      'group_order_id': groupOrderId,
+      'group_order_type': groupOrderType,
+
       'departure_address': departureAddress,
       'departure_city': departureCity,
       'departure_postal_code': departurePostalCode,
@@ -285,7 +309,7 @@ class Mission {
       'departure_place_name': departurePlaceName,
       'arrival_location_type': arrivalLocationType,
       'arrival_place_name': arrivalPlaceName,
-      'vehicle_notes': vehicleNotes, // ✅ ajouté ici
+      'vehicle_notes': vehicleNotes,
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
     };
@@ -294,11 +318,16 @@ class Mission {
   // =====================================================
   // MÉTHODES D’AIDE
   // =====================================================
+
   String get displayDeparture =>
-      departureCityDisplay?.isNotEmpty == true ? departureCityDisplay! : departureAddress;
+      departureCityDisplay?.isNotEmpty == true
+          ? departureCityDisplay!
+          : departureAddress;
 
   String get displayArrival =>
-      arrivalCityDisplay?.isNotEmpty == true ? arrivalCityDisplay! : arrivalAddress;
+      arrivalCityDisplay?.isNotEmpty == true
+          ? arrivalCityDisplay!
+          : arrivalAddress;
 
   bool canStartDepartureInspection() {
     if (pickupDatetime == null) return false;
