@@ -14,12 +14,17 @@ class MissionCard extends StatelessWidget {
   final VoidCallback onTap;
   final bool showStatus;
 
+  /// 🔥 nouveau
+  final int? remainingCount;
+
   const MissionCard({
     super.key,
     required this.mission,
     required this.onTap,
     this.showStatus = false,
+    this.remainingCount,
   });
+
 
   // -------- Helpers prix (arrondi "site") --------
   int _roundSite(double value) {
