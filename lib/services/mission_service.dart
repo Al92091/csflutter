@@ -9,21 +9,33 @@ class MissionService {
 
   /// 🔹 Récupérer les missions disponibles (pas encore réservées)
   Future<List<Mission>> fetchAvailableMissions() async {
-    final response = await _client
-        .from('missions')
-        .select('*, vehicle_models(image_url), customer_profile:profiles!missions_customer_id_fkey(company_logo_url)')
-        .eq('status', AppConstants.statusRechercheDriver)
-        .order('pickup_datetime', ascending: true);
+final response = await _client
+    .from('missions')
+    .select('''
+      *,
+      group_orders(
+        id,
+        group_order_type,
+        status
+      ),
+      vehicle_models(image_url),
+      customer_profile:profiles!missions_customer_id_fkey(company_logo_url)
+    ''')
+    .eq('status', AppConstants.statusRechercheDriver)
+    .order('pickup_datetime', ascending: true);
 
-    return (response as List).map((json) {
-      return Mission.fromJson({
-        ...json,
-        'vehicle_image_url': json['vehicle_models']?['image_url'],
-        'company_logo_url': json['customer_profile']?['company_logo_url'], // ✅ logo client
-        'distance_mission': json['distance_mission'], // ✅ distance correcte
-        'reserved_driver_price': json['reserved_driver_price'], // ✅ ajouté pour cohérence
-      });
-    }).toList();
+return (response as List).map((json) {
+  return Mission.fromJson({
+    ...json,
+    'vehicle_image_url': json['vehicle_models']?['image_url'],
+    'company_logo_url': json['customer_profile']?['company_logo_url'],
+    'distance_mission': json['distance_mission'],
+    'reserved_driver_price': json['reserved_driver_price'],
+
+    // 🔥 flatten du type du group order
+    'group_order_type': json['group_orders']?['group_order_type'],
+  });
+}).toList();
   }
 
   /// 🔹 Récupérer les missions du driver connecté
