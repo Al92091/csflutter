@@ -2,10 +2,10 @@
 
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+
 import '../config/theme.dart';
 import '../models/mission.dart';
 import '../utils/formatters.dart';
-
 // ✅ import du calculateur de prix
 import 'package:carswift_driver/services/driver_price_calculator.dart';
 
@@ -14,7 +14,7 @@ class MissionCard extends StatelessWidget {
   final VoidCallback onTap;
   final bool showStatus;
 
-  /// 🔥 nouveau
+  /// nouveau : nombre de missions dans le groupe (pour le badge xN)
   final int? remainingCount;
 
   const MissionCard({
@@ -25,8 +25,8 @@ class MissionCard extends StatelessWidget {
     this.remainingCount,
   });
 
-
   // -------- Helpers prix (arrondi "site") --------
+
   int _roundSite(double value) {
     final euros = value.floor();
     final cents = ((value * 100).floor()) % 100;
@@ -85,7 +85,7 @@ class MissionCard extends StatelessWidget {
   Widget _buildCalculatedPrice() {
     final calculator = DriverPriceCalculator();
 
-    final options = <String, bool>{
+    final options = {
       'document_management': mission.documentManagement ?? false,
       'basic_handover': mission.basicHandover ?? false,
       'comfort_handover': mission.comfortHandover ?? false,
@@ -99,11 +99,10 @@ class MissionCard extends StatelessWidget {
     final isReturn = (mission.isReturnMission ?? false) ||
         (mission.missionType == 'livraison_reprise');
 
-    return FutureBuilder<String>(
+    return FutureBuilder(
       future: () async {
         final driverStatus =
             await calculator.getCurrentDriverStatus() ?? 'active_beginner';
-
         final distance = mission.distanceMission ?? 0.0;
 
         final rawPrice = await calculator.calculateFinalDriverPrice(
@@ -117,9 +116,10 @@ class MissionCard extends StatelessWidget {
         return _formatEuroInt(rounded);
       }(),
       builder: (context, snap) {
-        final txt = snap.connectionState == ConnectionState.done && snap.hasData
-            ? snap.data!
-            : '...';
+        final txt =
+            snap.connectionState == ConnectionState.done && snap.hasData
+                ? snap.data!
+                : '...';
 
         return Text(
           txt,
@@ -137,6 +137,7 @@ class MissionCard extends StatelessWidget {
   Widget _buildReservedPrice() {
     final price = mission.reservedDriverPrice ?? 0.0;
     final rounded = _roundSite(price);
+
     return Text(
       _formatEuroInt(rounded),
       style: const TextStyle(
@@ -153,37 +154,57 @@ class MissionCard extends StatelessWidget {
     final opts = <Widget>[];
 
     if (mission.wGarage == true) {
-      opts.add(Text("W", style: TextStyle(fontWeight: FontWeight.bold, color: blue)));
+      opts.add(
+        Text(
+          "W",
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: blue,
+          ),
+        ),
+      );
     }
+
     if (mission.basicHandover == true || mission.comfortHandover == true) {
       opts.add(Icon(LucideIcons.handshake, size: 18, color: blue));
     }
+
     if (mission.basicWashing == true ||
         mission.standardWashing == true ||
         mission.premiumWashing == true) {
       opts.add(Icon(LucideIcons.droplet, size: 18, color: blue));
     }
+
     // ✅ Carburant : seulement si fuel_same_level OU plein
     if (mission.fuelManagement == "remise_niveau" ||
         mission.fuelManagement == "plein") {
       opts.add(Icon(LucideIcons.fuel, size: 18, color: blue));
     }
+
     if (mission.documentManagement == true) {
       opts.add(Icon(LucideIcons.fileText, size: 18, color: blue));
     }
+
     // ✅ Nouveau : icône véhicule électrique
     if (mission.electricVehicle == true) {
       opts.add(Icon(LucideIcons.zap, size: 18, color: blue));
     }
 
     return opts
-        .map((w) => Padding(padding: const EdgeInsets.only(left: 8), child: w))
+        .map(
+          (w) => Padding(
+            padding: const EdgeInsets.only(left: 8),
+            child: w,
+          ),
+        )
         .toList();
   }
 
   @override
   Widget build(BuildContext context) {
     final blue = const Color(0xFF2D59A2);
+    // ✅ Afficher le badge seulement si on a plus d’1 mission dans le groupe
+    final bool showCount = (remainingCount ?? 0) > 1;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -203,7 +224,10 @@ class MissionCard extends StatelessWidget {
                     _buildReservedPrice(),
                     Center(child: _buildCustomerLogo() ?? const SizedBox()),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
                       decoration: BoxDecoration(
                         color: _getStatusColor().withOpacity(0.1),
                         borderRadius: BorderRadius.circular(8),
@@ -211,9 +235,10 @@ class MissionCard extends StatelessWidget {
                       child: Text(
                         _getStatusLabel(),
                         style: TextStyle(
-                            color: _getStatusColor(),
-                            fontWeight: FontWeight.w600,
-                            fontSize: 12),
+                          color: _getStatusColor(),
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                        ),
                       ),
                     ),
                   ] else ...[
@@ -222,6 +247,7 @@ class MissionCard extends StatelessWidget {
                   ],
                 ],
               ),
+
               const SizedBox(height: 8),
 
               /// Missions disponibles : "Du JJ/MM au JJ/MM"
@@ -236,9 +262,10 @@ class MissionCard extends StatelessWidget {
                     Text(
                       "Du ${Formatters.formatDay(mission.availabilityStart)} au ${Formatters.formatDay(mission.deliveryDeadline)}",
                       style: TextStyle(
-                          fontSize: 12,
-                          color: blue,
-                          fontWeight: FontWeight.bold),
+                        fontSize: 12,
+                        color: blue,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ],
                 ),
@@ -253,18 +280,21 @@ class MissionCard extends StatelessWidget {
                     Text(
                       Formatters.formatShortDateTime(mission.pickupDatetime),
                       style: TextStyle(
-                          fontSize: 12,
-                          color: blue,
-                          fontWeight: FontWeight.bold),
+                        fontSize: 12,
+                        color: blue,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ],
                 ),
+
               const SizedBox(height: 12),
 
               /// Departure
               Row(
                 children: [
-                  Icon(Icons.circle, size: 12, color: AppTheme.successColor),
+                  Icon(Icons.circle,
+                      size: 12, color: AppTheme.successColor),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -274,12 +304,14 @@ class MissionCard extends StatelessWidget {
                   ),
                 ],
               ),
+
               const SizedBox(height: 8),
 
               /// Arrival
               Row(
                 children: [
-                  Icon(Icons.location_on, size: 12, color: AppTheme.errorColor),
+                  Icon(Icons.location_on,
+                      size: 12, color: AppTheme.errorColor),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -290,13 +322,59 @@ class MissionCard extends StatelessWidget {
                 ],
               ),
 
-              /// Image véhicule
+              /// Image véhicule + badge xN
               if (mission.vehicleImageUrl != null &&
                   mission.vehicleImageUrl!.isNotEmpty) ...[
                 const SizedBox(height: 12),
-                Center(
-                    child: Image.network(mission.vehicleImageUrl!,
-                        height: 80, fit: BoxFit.contain)),
+                SizedBox(
+                  height: 100,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Center(
+                        child: Image.network(
+                          mission.vehicleImageUrl!,
+                          height: 100,
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                      if (showCount)
+                        Positioned(
+                          top: -6,
+                          right: -6,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFE61B7F),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: Colors.white,
+                                width: 2,
+                              ),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Colors.black26,
+                                  blurRadius: 4,
+                                  offset: Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: Text(
+                              'x${remainingCount!}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ],
 
               const Divider(height: 24),
@@ -313,9 +391,10 @@ class MissionCard extends StatelessWidget {
                           int.tryParse(mission.estimatedTravelTime ?? ''),
                         ),
                         style: TextStyle(
-                            fontSize: 12,
-                            color: blue,
-                            fontWeight: FontWeight.bold),
+                          fontSize: 12,
+                          color: blue,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ],
                   ),
@@ -327,9 +406,10 @@ class MissionCard extends StatelessWidget {
                       Text(
                         Formatters.formatDistanceInt(mission.distanceMission),
                         style: TextStyle(
-                            fontSize: 12,
-                            color: blue,
-                            fontWeight: FontWeight.bold),
+                          fontSize: 12,
+                          color: blue,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ],
                   ),
