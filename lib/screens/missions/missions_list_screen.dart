@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../../config/theme.dart';
 import '../../models/mission.dart';
+import '../../models/mission_restriction.dart';
 import '../../services/mission_service.dart';
+import '../../services/supabase_service.dart';
 import '../../widgets/mission_card.dart';
 import '../../widgets/loading_indicator.dart';
 import 'mission_detail_screen.dart';
@@ -16,9 +18,9 @@ class MissionsListScreen extends StatefulWidget {
 
 /// Représente soit un groupe, soit une mission seule
 class _MissionGroup {
-  final Mission representative;    // mission affichée dans la carte
-  final int count;                 // Xn
-  final List<Mission> missions;    // toutes les missions du groupe
+  final Mission representative; // mission affichée dans la carte
+  final int count; // Xn
+  final List<Mission> missions; // toutes les missions du groupe
 
   _MissionGroup({
     required this.representative,
@@ -36,6 +38,18 @@ class _MissionsListScreenState extends State<MissionsListScreen> {
   bool _isLoading = true;
   String? _errorMessage;
 
+  /// Map des certifications validées du driver
+  /// clés : client_handover, LAVAGE, electric_vehicle, document_management
+  Map<String, bool> _certMap = {
+    'client_handover': false,
+    'LAVAGE': false,
+    'electric_vehicle': false,
+    'document_management': false,
+  };
+
+  /// Le driver possède-t-il une plaque W-Garage ?
+  bool _hasWGarage = false;
+
   @override
   void initState() {
     super.initState();
@@ -49,7 +63,13 @@ class _MissionsListScreenState extends State<MissionsListScreen> {
     });
 
     try {
+      // 1) Charger les infos du driver (w_garage + certifs)
+      await _loadDriverRestrictions();
+
+      // 2) Charger les missions disponibles
       final missions = await _missionService.fetchAvailableMissions();
+
+      // 3) Appliquer la logique de regroupement SameVehicleSameDest
       final groups = _groupMissions(missions);
 
       setState(() {
@@ -63,6 +83,56 @@ class _MissionsListScreenState extends State<MissionsListScreen> {
         _isLoading = false;
       });
     }
+  }
+
+  /// Charge w_garage + certifications validées du driver connecté
+  Future<void> _loadDriverRestrictions() async {
+    final client = SupabaseService.client;
+    final userId = SupabaseService.currentUserId;
+
+    // Pas d'utilisateur connecté => par sécurité, aucune certif / pas de W-Garage
+    if (userId == null) {
+      _certMap = {
+        'client_handover': false,
+        'LAVAGE': false,
+        'electric_vehicle': false,
+        'document_management': false,
+      };
+      _hasWGarage = false;
+      return;
+    }
+
+    // 1) Profil : w_garage
+    final profile = await client
+        .from('profiles')
+        .select('w_garage')
+        .eq('id', userId)
+        .single();
+
+    _hasWGarage = profile['w_garage'] == true;
+
+    // 2) Certifications validées
+    final certs = await client
+        .from('driver_certifications')
+        .select('certifications(code)')
+        .eq('driver_id', userId)
+        .eq('is_validated', true);
+
+    final map = {
+      'client_handover': false,
+      'LAVAGE': false,
+      'electric_vehicle': false,
+      'document_management': false,
+    };
+
+    for (final row in certs as List) {
+      final code = row['certifications']?['code'] as String?;
+      if (code != null && map.containsKey(code)) {
+        map[code] = true;
+      }
+    }
+
+    _certMap = map;
   }
 
   /// Calqué sur la logique Lovable (site) :
@@ -97,7 +167,7 @@ class _MissionsListScreenState extends State<MissionsListScreen> {
     buckets.forEach((groupId, list) {
       if (list.isEmpty) return;
 
-      // on peut trier par deadline ou pickup
+      // On trie par deadline / pickup pour la carte représentative
       list.sort((a, b) {
         final ad = a.deliveryDeadline ?? a.pickupDatetime ?? a.createdAt;
         final bd = b.deliveryDeadline ?? b.pickupDatetime ?? b.createdAt;
@@ -136,6 +206,54 @@ class _MissionsListScreenState extends State<MissionsListScreen> {
     });
 
     return result;
+  }
+
+  /// Affiche un dialog expliquant pourquoi la mission est bloquée
+  void _showRestrictionDialog(MissionRestriction restriction) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Mission non accessible'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (restriction.isWGarageRestricted) ...[
+                const Text('❌ Plaque W-Garage requise'),
+                const SizedBox(height: 8),
+              ],
+              if (restriction.isCertificationRestricted) ...[
+                const Text('❌ Certifications manquantes :'),
+                const SizedBox(height: 4),
+                ...restriction.missingCertifications.map(
+                  (cert) => Padding(
+                    padding: const EdgeInsets.only(left: 16, bottom: 2),
+                    child: Text('• $cert'),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+              const SizedBox(height: 8),
+              const Text(
+                'Obtenez ces certifications sur le site web CarSwiift '
+                'dans votre espace "Certifications".',
+                style: TextStyle(
+                  fontStyle: FontStyle.italic,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Fermer'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
@@ -227,22 +345,37 @@ class _MissionsListScreenState extends State<MissionsListScreen> {
           final group = _groups[index];
           final mission = group.representative;
 
-          return MissionCard(
-            mission: mission,
-            // 🔥 c’est ici qu’on passe le nombre pour le badge Xn
-            remainingCount: group.count,
-            onTap: () {
-              Navigator.of(context)
-                  .push(
-                MaterialPageRoute(
-                  builder: (_) => MissionDetailScreen(
-                    missionId: mission.id,
-                    isAvailable: true,
-                  ),
-                ),
-              )
-                  .then((_) => _loadMissions());
-            },
+          // 🔥 Calcul de la restriction pour cette mission (représentative du groupe)
+          final restriction = MissionRestrictionChecker.check(
+            mission,
+            _certMap,
+            _hasWGarage,
+          );
+
+          final bool isRestricted = restriction.isRestricted;
+
+          return Opacity(
+            opacity: isRestricted ? 0.4 : 1.0, // floutage visuel
+            child: MissionCard(
+              mission: mission,
+              remainingCount: group.count, // pour le badge xN
+              onTap: () {
+                if (isRestricted) {
+                  _showRestrictionDialog(restriction);
+                } else {
+                  Navigator.of(context)
+                      .push(
+                    MaterialPageRoute(
+                      builder: (_) => MissionDetailScreen(
+                        missionId: mission.id,
+                        isAvailable: true,
+                      ),
+                    ),
+                  )
+                      .then((_) => _loadMissions());
+                }
+              },
+            ),
           );
         },
       ),
