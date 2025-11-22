@@ -7,6 +7,8 @@ import 'package:timezone/timezone.dart' as tz;
 import 'config/theme.dart';
 import 'config/constants.dart';
 import 'screens/auth/splash_screen.dart';
+import 'package:intl/date_symbol_data_local.dart';
+
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -14,6 +16,10 @@ Future<void> main() async {
   // ✅ Initialisation de la timezone Europe/Paris
   tz.initializeTimeZones();
   tz.setLocalLocation(tz.getLocation('Europe/Paris'));
+
+  
+  // ✅ Initialisation des données de locale pour fr_FR (Intl / DateFormat)
+  await initializeDateFormatting('fr_FR', null);
 
   await Supabase.initialize(
     url: AppConstants.supabaseUrl,
