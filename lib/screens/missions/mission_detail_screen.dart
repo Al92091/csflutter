@@ -15,6 +15,7 @@ import '../../utils/formatters.dart';
 import '../../widgets/loading_indicator.dart';
 import '../inspection/inspection_flow_screen.dart';
 import 'package:carswift_driver/services/driver_price_calculator.dart';
+import 'mission_reservation_screen.dart';
 
 class MissionDetailScreen extends StatefulWidget {
   final String missionId;
@@ -949,7 +950,32 @@ children.add(SizedBox(height: 16));
             width: double.infinity,
             height: 50,
             child: ElevatedButton(
-              onPressed: _isBooking ? null : _bookMission,
+              onPressed: (_isBooking || _mission == null)
+              ? null
+              : () async {
+                  setState(() => _isBooking = true);
+
+                  // On ouvre l'écran de réservation
+                  final result = await Navigator.of(context).push<bool>(
+                    MaterialPageRoute(
+                      builder: (_) => MissionReservationScreen(
+                        mission: _mission!,
+                      ),
+                    ),
+                  );
+
+                  // Si la réservation a réussi dans l'écran enfant
+                  if (result == true) {
+                    await _loadMission(); // rafraîchir les infos
+                    if (!mounted) return;
+                    // On revient à la liste en indiquant que quelque chose a changé
+                    Navigator.of(context).pop(true);
+                  } else {
+                    if (mounted) {
+                      setState(() => _isBooking = false);
+                    }
+                  }
+                },
               child: _isBooking
                   ? SizedBox(
                       width: 24,
