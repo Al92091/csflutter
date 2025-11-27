@@ -789,4 +789,3 @@ class _InspectionFlowScreenState extends State<InspectionFlowScreen> {
     );
   }
 }
-
